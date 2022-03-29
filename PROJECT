@@ -1,0 +1,16 @@
+domain: gitlab.domain
+layout:
+- go.kubebuilder.io/v3
+projectName: gitlab-operator
+repo: gitlab-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: gitlab.domain
+  group: devops
+  kind: Gitlab
+  path: gitlab-operator/api/v1
+  version: v1
+version: "3"

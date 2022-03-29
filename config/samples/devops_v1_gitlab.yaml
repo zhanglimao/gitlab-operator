@@ -1,0 +1,17 @@
+apiVersion: devops.gitlab.domain/v1
+kind: Gitlab
+metadata:
+  name: gitlab-sample
+  namespace: "gitlab"
+spec:
+  image: "gitlab/gitlab-ce"
+  port:
+    - containerport: 80
+      hostport: 81
+    - name: "https"
+      containerport: 443
+      hostport: 7443
+    - name: "ssh"
+      containerport: 22
+      hostport: 223
+  defaultpassword: "123456"
