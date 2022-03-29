@@ -21,6 +21,8 @@ import (
 
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,7 +41,8 @@ import (
 // GitlabReconciler reconciles a Gitlab object
 type GitlabReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=devops.gitlab.domain,resources=gitlabs,verbs=get;list;watch;create;update;patch;delete
@@ -57,18 +60,39 @@ type GitlabReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
+	var err error
+	defer func() {
+		if err != nil {
+			// TODO Clean Env
+		}
+	}()
 
 	gitlab := &devopsv1.Gitlab{}
-	if err := r.Get(context.TODO(), req.NamespacedName, gitlab); err != nil {
-		if apierrors.IsNotFound(err) {
+	if err = r.Get(context.TODO(), req.NamespacedName, gitlab); err != nil {
+		if !apierrors.IsNotFound(err) {
+			glog.Error(err)
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{Requeue: true}, err
+		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if err := createGitlabDm(r, gitlab); err != nil {
-		return ctrl.Result{Requeue: true}, err
+	if err = createGitlabDm(r, gitlab); err != nil {
+		glog.Error(err)
+		return ctrl.Result{}, err
 	}
+	r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Deploy Gitlab Complate")
+
+	if err = createGitlabSvc(r, gitlab); err != nil {
+		glog.Error(err)
+		return ctrl.Result{}, err
+	}
+
+	gitlab.Status.BuildStage = "Init"
+	if err := r.Status().Update(context.TODO(), gitlab); err != nil {
+		glog.Error(err)
+		return ctrl.Result{}, err
+	}
+	r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Deploy Gitlab Service Complate")
 
 	return ctrl.Result{}, nil
 }
@@ -78,6 +102,61 @@ func (r *GitlabReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&devopsv1.Gitlab{}).
 		Complete(r)
+}
+
+func createGitlabSvc(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
+	for _, export := range gitlab.Spec.Port {
+		service := &corev1.Service{}
+		service.Name = gitlab.Name + "-" + export.Name
+		service.Namespace = gitlab.Namespace
+		service.Spec.Selector = map[string]string{"app": gitlab.Name}
+		if string(corev1.ServiceTypeClusterIP) == export.ExportType {
+			service.Spec.Type = corev1.ServiceTypeClusterIP
+			svcPort := corev1.ServicePort{
+				Name:       export.Name,
+				Port:       export.ContainerPort,
+				TargetPort: intstr.FromInt(int(export.ExportPort)),
+			}
+			svcPorts := []corev1.ServicePort{}
+			svcPorts = append(svcPorts, svcPort)
+			service.Spec.Ports = svcPorts
+
+		} else if string(corev1.ServiceTypeNodePort) == export.ExportType {
+			service.Spec.Type = corev1.ServiceTypeNodePort
+			svcPort := corev1.ServicePort{
+				Name:       export.Name,
+				Port:       export.ContainerPort,
+				TargetPort: intstr.FromInt(int(export.ContainerPort)),
+				NodePort:   export.ExportPort,
+			}
+			svcPorts := []corev1.ServicePort{}
+			svcPorts = append(svcPorts, svcPort)
+			service.Spec.Ports = svcPorts
+		} else {
+			service.Spec.Type = corev1.ServiceTypeClusterIP
+			svcPort := corev1.ServicePort{
+				Name:       export.Name,
+				Port:       export.ContainerPort,
+				TargetPort: intstr.FromInt(int(export.ExportPort)),
+			}
+			svcPorts := []corev1.ServicePort{}
+			svcPorts = append(svcPorts, svcPort)
+			service.Spec.Ports = svcPorts
+		}
+
+		if err := controllerutil.SetControllerReference(gitlab, service, r.Scheme); err != nil {
+			glog.Error(err)
+			return err
+		}
+
+		glog.Infof("Create Gitlab Service Success[%s/%s].", service.Namespace, service.Name)
+		if err := r.Create(context.TODO(), service); err != nil {
+			glog.Error(err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func createGitlabDm(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
@@ -90,19 +169,19 @@ func createGitlabDm(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 			Replicas: pointer.Int32Ptr(1),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app": gitlab.Namespace,
+					"app": gitlab.Name,
 				},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app": gitlab.Namespace,
+						"app": gitlab.Name,
 					},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:            gitlab.Namespace,
+							Name:            gitlab.Name,
 							Image:           gitlab.Spec.Image,
 							ImagePullPolicy: "IfNotPresent",
 							Env: []corev1.EnvVar{
@@ -122,7 +201,7 @@ func createGitlabDm(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 	for _, port := range gitlab.Spec.Port {
 		dmport := corev1.ContainerPort{
 			Name:          port.Name,
-			HostPort:      port.HostPort,
+			HostPort:      port.ExportPort,
 			ContainerPort: port.ContainerPort,
 		}
 		dmports = append(dmports, dmport)

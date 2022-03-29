@@ -7,11 +7,13 @@ spec:
   image: "gitlab/gitlab-ce"
   port:
     - containerport: 80
-      hostport: 81
+      exportport: 30080
+      name: "http"
+      exporttype: "NodePort"
     - name: "https"
       containerport: 443
-      hostport: 7443
+      exportport: 7443
     - name: "ssh"
       containerport: 22
-      hostport: 223
-  defaultpassword: "123456"
+      exportport: 30022
+  defaultpassword: "12345678"

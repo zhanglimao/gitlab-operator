@@ -82,8 +82,9 @@ func main() {
 	}
 
 	if err = (&controllers.GitlabReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("Gitlab"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Gitlab")
 		os.Exit(1)

@@ -15,7 +15,14 @@ spec:
     singular: gitlab
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .status.buildstage
+      name: BuildStage
+      type: string
+    - jsonPath: .status.networkavailable
+      name: NetworkAvailable
+      type: boolean
+    name: v1
     schema:
       openAPIV3Schema:
         description: Gitlab is the Schema for the gitlabs API
@@ -50,15 +57,19 @@ spec:
                       description: Container Port
                       format: int32
                       type: integer
-                    hostport:
+                    exportport:
                       description: Host Port
                       format: int32
                       type: integer
+                    exporttype:
+                      description: Export Port Type
+                      type: string
                     name:
                       description: Export Port Name
                       type: string
                   required:
                   - containerport
+                  - name
                   type: object
                 type: array
             required:
@@ -67,11 +78,13 @@ spec:
           status:
             description: GitlabStatus defines the observed state of Gitlab
             properties:
-              health:
+              buildstage:
                 description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
                   of cluster Important: Run "make" to regenerate code after modifying
                   this file'
                 type: string
+              networkavailable:
+                type: boolean
             type: object
         type: object
     served: true

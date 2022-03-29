@@ -23,11 +23,13 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type ContainerPort struct {
+type ExportPort struct {
+	// Export Port Type
+	ExportType string `json:"exporttype,omitempty"`
 	// Export Port Name
-	Name string `json:"name,omitempty"`
+	Name string `json:"name"`
 	// Host Port
-	HostPort int32 `json:"hostport,omitempty"`
+	ExportPort int32 `json:"exportport,omitempty"`
 	// Container Port
 	ContainerPort int32 `json:"containerport"`
 }
@@ -40,7 +42,7 @@ type GitlabSpec struct {
 	// Gitlab Container Image
 	Image string `json:"image"`
 	// Gitlab Export Port List
-	Port []ContainerPort `json:"port,omitempty"`
+	Port []ExportPort `json:"port,omitempty"`
 	// Gitlab Admin Account Default Password,Also Use Env GITLAB_ROOT_PASSWORD To Specify Default Passwd
 	DefaultPassword string `json:"defaultpassword,omitempty"`
 }
@@ -49,11 +51,14 @@ type GitlabSpec struct {
 type GitlabStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Health string `json:"health,omitempty"`
+	BuildStage       string `json:"buildstage,omitempty"`
+	NetworkAvailable bool   `json:"networkavailable,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:JSONPath=".status.buildstage",name=BuildStage,type=string
+//+kubebuilder:printcolumn:JSONPath=".status.networkavailable",name=NetworkAvailable,type=boolean
 
 // Gitlab is the Schema for the gitlabs API
 type Gitlab struct {
