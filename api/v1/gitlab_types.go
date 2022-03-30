@@ -57,6 +57,9 @@ type GitlabStatus struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups="",resources=service,verbs=get;watch;list;create;update;delete
+//+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;watch;list;create;update;delete
 //+kubebuilder:printcolumn:JSONPath=".status.buildstage",name=BuildStage,type=string
 //+kubebuilder:printcolumn:JSONPath=".status.networkavailable",name=NetworkAvailable,type=boolean
 
