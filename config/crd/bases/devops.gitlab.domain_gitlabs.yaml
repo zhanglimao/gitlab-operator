@@ -83,8 +83,8 @@ spec:
                   of cluster Important: Run "make" to regenerate code after modifying
                   this file'
                 type: string
-              networkavailable:
-                type: boolean
+              network:
+                type: string
             type: object
         type: object
     served: true

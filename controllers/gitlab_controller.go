@@ -18,21 +18,18 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	devopsv1 "gitlab-operator/api/v1"
 
@@ -79,25 +76,77 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	if !gitlab.ObjectMeta.DeletionTimestamp.IsZero() {
-		glog.Info()
-		return ctrl.Result{}, err
+	gitlabdm := &appsv1.Deployment{}
+	if err = r.Get(context.TODO(), req.NamespacedName, gitlabdm); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Can Not Find Deployment, Maybe Fist Init Status")
+		}
+	} else {
+		if gitlabdm.Status.Replicas > 0 && gitlabdm.Status.Replicas == gitlabdm.Status.ReadyReplicas {
+			gitlab.Status.BuildStage = "Ready"
+			if err := r.Status().Update(context.TODO(), gitlab); err != nil {
+				glog.Error(err)
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Deployment Success")
+		} else {
+			gitlab.Status.BuildStage = "NotReady"
+			if err := r.Status().Update(context.TODO(), gitlab); err != nil {
+				glog.Error(err)
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Wait Deployment Ready...")
+		}
 	}
 
-	glog.Info()
+	if len(gitlabdm.Spec.Template.Labels) != 0 {
+		gitlabsvc := &corev1.ServiceList{}
+		if err = r.List(context.TODO(), gitlabsvc, client.MatchingLabels(gitlabdm.Spec.Template.Labels)); err != nil {
+			if apierrors.IsNotFound(err) {
+				gitlab.Status.Network = "Pre Init"
+				if err := r.Status().Update(context.TODO(), gitlab); err != nil {
+					glog.Error(err)
+					return ctrl.Result{}, err
+				}
+			}
+		} else {
+			waitnetwork := false
+			for _, svc := range gitlabsvc.Items {
+				endpoint := &corev1.Endpoints{}
+				nsname := types.NamespacedName{
+					Name:      svc.Name,
+					Namespace: svc.Namespace,
+				}
+				if err = r.Get(context.TODO(), nsname, endpoint); err != nil {
+					if apierrors.IsNotFound(err) {
+						msg := fmt.Sprintf("Wait For Endpoint Initialization Corresponding To The Service [%s] To Complete", svc.Name)
+						r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", msg)
+					}
+					waitnetwork = true
+				} else {
+					msg := fmt.Sprintf("Service [%s] Init Complete", svc.Name)
+					r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", msg)
+				}
+			}
+			if !waitnetwork {
+				gitlab.Status.Network = "Ready"
+				if err := r.Status().Update(context.TODO(), gitlab); err != nil {
+					glog.Error(err)
+					return ctrl.Result{}, err
+				}
+				r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Network Success")
+			}
+		}
+	}
+
+	if !gitlab.ObjectMeta.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, err
+	}
 
 	if err = createGitlab(r, gitlab); err != nil {
 		glog.Error(err)
 		return ctrl.Result{}, err
 	}
-	r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Deploy Gitlab Complate")
-
-	gitlab.Status.BuildStage = "Init"
-	if err := r.Status().Update(context.TODO(), gitlab); err != nil {
-		glog.Error(err)
-		return ctrl.Result{}, err
-	}
-	r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Deploy Gitlab Service Complate")
 
 	return ctrl.Result{}, nil
 }
@@ -106,32 +155,9 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func (r *GitlabReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&devopsv1.Gitlab{}).
-		Watches(&source.Kind{Type: &appsv1.Deployment{}}, handler.Funcs{
-			CreateFunc: r.deploymentCreateHandler,
-			UpdateFunc: r.deploymentUpdateHandler,
-		}).
-		Watches(&source.Kind{Type: &corev1.Service{}}, handler.Funcs{UpdateFunc: r.serviceUpdateHandler}).
-		Watches(&source.Kind{Type: &corev1.Endpoints{}}, handler.Funcs{UpdateFunc: r.endpointsUpdateHandler}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
 		Complete(r)
-}
-
-func (r *GitlabReconciler) deploymentCreateHandler(evt event.CreateEvent, q workqueue.RateLimitingInterface) {
-	glog.Info(evt.Object.GetName())
-	glog.Info(evt.Object.GetNamespace())
-	glog.Info(evt.Object.GetObjectKind())
-}
-
-func (r *GitlabReconciler) deploymentUpdateHandler(evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
-	glog.Info()
-}
-
-func (r *GitlabReconciler) serviceUpdateHandler(evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
-	glog.Info()
-}
-
-func (r *GitlabReconciler) endpointsUpdateHandler(evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
-	glog.Info(evt.ObjectNew.GetName())
-	glog.Info(evt.ObjectNew.GetNamespace())
 }
 
 func checkRsExist(r *GitlabReconciler, name, ns string, rstype client.Object) bool {
@@ -140,11 +166,6 @@ func checkRsExist(r *GitlabReconciler, name, ns string, rstype client.Object) bo
 			Name:      name,
 			Namespace: ns,
 		},
-	}
-
-	if err := r.Get(context.TODO(), rs.NamespacedName, rstype); err != nil {
-		glog.Info(err)
-		return false
 	}
 
 	if err := r.Get(context.TODO(), rs.NamespacedName, rstype); err != nil {
@@ -192,9 +213,7 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 			},
 		},
 	}
-	if checkRsExist(r, gitlabDm.Name, gitlabDm.Namespace, gitlabDm) {
-		glog.Info()
-	} else {
+	if !checkRsExist(r, gitlabDm.Name, gitlabDm.Namespace, gitlabDm) {
 		dmports := []corev1.ContainerPort{}
 		for _, port := range gitlab.Spec.Port {
 			dmport := corev1.ContainerPort{
@@ -219,9 +238,11 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 	for _, export := range gitlab.Spec.Port {
 		service := &corev1.Service{}
 		service.Name = gitlab.Name + "-" + export.Name
+		service.Labels = map[string]string{
+			"app": gitlab.Name,
+		}
 		service.Namespace = gitlab.Namespace
 		if checkRsExist(r, service.Name, service.Namespace, service) {
-			glog.Info()
 			continue
 		} else {
 			service.Spec.Selector = map[string]string{"app": gitlab.Name}

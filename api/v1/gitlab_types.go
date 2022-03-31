@@ -51,8 +51,8 @@ type GitlabSpec struct {
 type GitlabStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	BuildStage       string `json:"buildstage,omitempty"`
-	NetworkAvailable bool   `json:"networkavailable,omitempty"`
+	BuildStage string `json:"buildstage,omitempty"`
+	Network    string `json:"network,omitempty"`
 }
 
 //+kubebuilder:object:root=true
