@@ -71,7 +71,7 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	gitlab := &devopsv1.Gitlab{}
 	if err = r.Get(context.TODO(), req.NamespacedName, gitlab); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -79,23 +79,25 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	gitlabdm := &appsv1.Deployment{}
 	if err = r.Get(context.TODO(), req.NamespacedName, gitlabdm); err != nil {
 		if apierrors.IsNotFound(err) {
-			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Can Not Find Deployment, Maybe Fist Init Status")
+			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Can Not Find Deployment, Maybe In The Construction Stage.")
 		}
 	} else {
-		if gitlabdm.Status.Replicas > 0 && gitlabdm.Status.Replicas == gitlabdm.Status.ReadyReplicas {
+		if gitlabdm.Status.Replicas > 0 && gitlabdm.Status.Replicas == gitlabdm.Status.ReadyReplicas && gitlab.Status.BuildStage != "Ready" {
 			gitlab.Status.BuildStage = "Ready"
 			if err := r.Status().Update(context.TODO(), gitlab); err != nil {
 				glog.Error(err)
 				return ctrl.Result{}, err
 			}
-			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Deployment Success")
-		} else {
+			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Deployment Success.")
+			return ctrl.Result{}, nil
+		} else if gitlabdm.Status.Replicas > 0 && gitlabdm.Status.Replicas != gitlabdm.Status.ReadyReplicas {
 			gitlab.Status.BuildStage = "NotReady"
 			if err := r.Status().Update(context.TODO(), gitlab); err != nil {
 				glog.Error(err)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Wait Deployment Ready...")
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -119,28 +121,31 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				}
 				if err = r.Get(context.TODO(), nsname, endpoint); err != nil {
 					if apierrors.IsNotFound(err) {
-						msg := fmt.Sprintf("Wait For Endpoint Initialization Corresponding To The Service [%s] To Complete", svc.Name)
+						msg := fmt.Sprintf("Wait For Endpoint Initialization Corresponding To The Service [%s] To Complete.", svc.Name)
 						r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", msg)
+						return ctrl.Result{}, nil
 					}
-					waitnetwork = true
 				} else {
-					msg := fmt.Sprintf("Service [%s] Init Complete", svc.Name)
-					r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", msg)
+					if len(endpoint.Subsets) == 0 {
+						break
+					}
+					for _, sub := range endpoint.Subsets {
+						if len(sub.NotReadyAddresses) != 0 {
+							waitnetwork = true
+						}
+					}
+					if !waitnetwork && gitlab.Status.Network != "Ready" {
+						gitlab.Status.Network = "Ready"
+						if err := r.Status().Update(context.TODO(), gitlab); err != nil {
+							glog.Error(err)
+							return ctrl.Result{}, err
+						}
+						r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Network Success.")
+						return ctrl.Result{}, nil
+					}
 				}
-			}
-			if !waitnetwork {
-				gitlab.Status.Network = "Ready"
-				if err := r.Status().Update(context.TODO(), gitlab); err != nil {
-					glog.Error(err)
-					return ctrl.Result{}, err
-				}
-				r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Network Success")
 			}
 		}
-	}
-
-	if !gitlab.ObjectMeta.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, err
 	}
 
 	if err = createGitlab(r, gitlab); err != nil {
@@ -225,6 +230,17 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 		}
 
 		gitlabDm.Spec.Template.Spec.Containers[0].Ports = dmports
+		rp := &corev1.Probe{
+			InitialDelaySeconds: 180,
+			PeriodSeconds:       5,
+			FailureThreshold:    30,
+		}
+		rp.Exec = &corev1.ExecAction{
+			Command: []string{
+				"/bin/bash", "-c", "/opt/gitlab/bin/gitlab-healthcheck",
+			},
+		}
+		gitlabDm.Spec.Template.Spec.Containers[0].ReadinessProbe = rp
 
 		if err := controllerutil.SetControllerReference(gitlab, gitlabDm, r.Scheme); err != nil {
 			glog.Error(err)

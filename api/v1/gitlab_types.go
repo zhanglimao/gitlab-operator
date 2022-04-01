@@ -53,6 +53,7 @@ type GitlabStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 	BuildStage string `json:"buildstage,omitempty"`
 	Network    string `json:"network,omitempty"`
+	Health     string `json:"health,omitempty"`
 }
 
 //+kubebuilder:object:root=true

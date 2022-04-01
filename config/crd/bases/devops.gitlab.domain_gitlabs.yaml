@@ -83,6 +83,8 @@ spec:
                   of cluster Important: Run "make" to regenerate code after modifying
                   this file'
                 type: string
+              health:
+                type: string
               network:
                 type: string
             type: object
