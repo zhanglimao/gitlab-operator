@@ -29,11 +29,15 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	devopsv1 "gitlab-operator/api/v1"
 	"gitlab-operator/controllers"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -75,6 +79,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "202ca39d.gitlab.domain",
+		ClientDisableCacheFor:  []client.Object{&appsv1.Deployment{}, &corev1.Service{}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

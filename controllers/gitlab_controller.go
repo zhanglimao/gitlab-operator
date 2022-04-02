@@ -90,7 +90,7 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			}
 			r.Recorder.Event(gitlab, corev1.EventTypeNormal, "Init", "Init Deployment Success.")
 			return ctrl.Result{}, nil
-		} else if gitlabdm.Status.Replicas > 0 && gitlabdm.Status.Replicas != gitlabdm.Status.ReadyReplicas {
+		} else if gitlabdm.Status.Replicas > 0 && gitlabdm.Status.Replicas != gitlabdm.Status.ReadyReplicas && gitlab.Status.BuildStage != "NotReady" {
 			gitlab.Status.BuildStage = "NotReady"
 			if err := r.Status().Update(context.TODO(), gitlab); err != nil {
 				glog.Error(err)
@@ -148,7 +148,12 @@ func (r *GitlabReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	if err = createGitlab(r, gitlab); err != nil {
+	if err = r.reconcilerGitlabDm(gitlab, req); err != nil {
+		glog.Error(err)
+		return ctrl.Result{}, err
+	}
+
+	if err = r.reconcilerGitlabSvc(gitlab, req); err != nil {
 		glog.Error(err)
 		return ctrl.Result{}, err
 	}
@@ -165,23 +170,7 @@ func (r *GitlabReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func checkRsExist(r *GitlabReconciler, name, ns string, rstype client.Object) bool {
-	rs := ctrl.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      name,
-			Namespace: ns,
-		},
-	}
-
-	if err := r.Get(context.TODO(), rs.NamespacedName, rstype); err != nil {
-		glog.Info(err)
-		return false
-	}
-
-	return true
-}
-
-func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
+func (r *GitlabReconciler) reconcilerGitlabDm(gitlab *devopsv1.Gitlab, req ctrl.Request) error {
 	gitlabDm := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      gitlab.Name,
@@ -218,7 +207,8 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 			},
 		},
 	}
-	if !checkRsExist(r, gitlabDm.Name, gitlabDm.Namespace, gitlabDm) {
+	oldDm := &appsv1.Deployment{}
+	if err := r.Get(context.TODO(), req.NamespacedName, oldDm); err != nil && apierrors.IsNotFound(err) {
 		dmports := []corev1.ContainerPort{}
 		for _, port := range gitlab.Spec.Port {
 			dmport := corev1.ContainerPort{
@@ -247,10 +237,16 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 			return err
 		}
 
-		glog.Infof("Create Gitlab Deployment Success[%s/%s].", gitlabDm.Namespace, gitlab.Name)
+		glog.Infof("Create Gitlab Deployment Success[%s/%s].", gitlab.Namespace, gitlab.Name)
 		r.Create(context.TODO(), gitlabDm)
+	} else {
+		// todo update
 	}
 
+	return nil
+}
+
+func (r *GitlabReconciler) reconcilerGitlabSvc(gitlab *devopsv1.Gitlab, req ctrl.Request) error {
 	for _, export := range gitlab.Spec.Port {
 		service := &corev1.Service{}
 		service.Name = gitlab.Name + "-" + export.Name
@@ -258,9 +254,12 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 			"app": gitlab.Name,
 		}
 		service.Namespace = gitlab.Namespace
-		if checkRsExist(r, service.Name, service.Namespace, service) {
-			continue
-		} else {
+		oldSvc := &corev1.Service{}
+		svcNameNs := types.NamespacedName{
+			Name:      service.Name,
+			Namespace: req.Namespace,
+		}
+		if err := r.Get(context.TODO(), svcNameNs, oldSvc); err != nil && apierrors.IsNotFound(err) {
 			service.Spec.Selector = map[string]string{"app": gitlab.Name}
 			if string(corev1.ServiceTypeClusterIP) == export.ExportType {
 				service.Spec.Type = corev1.ServiceTypeClusterIP
@@ -306,6 +305,8 @@ func createGitlab(r *GitlabReconciler, gitlab *devopsv1.Gitlab) error {
 				glog.Error(err)
 				return err
 			}
+		} else {
+			//todo update
 		}
 	}
 
