@@ -49,6 +49,10 @@ spec:
               image:
                 description: Gitlab Container Image
                 type: string
+              nodeselector:
+                description: 'Gitlab Pod Affinity With Node Name, Notidy: If Use Local
+                  Volume Ensure PV And Gitlab In The Same Node'
+                type: string
               port:
                 description: Gitlab Export Port List
                 items:
@@ -72,8 +76,14 @@ spec:
                   - name
                   type: object
                 type: array
+              volumename:
+                description: 'Kubernetes Persistent Volume Claim Name, Notify: Ensure
+                  PVC And Gitlab In The Same Namespace'
+                type: string
             required:
             - image
+            - nodeselector
+            - volumename
             type: object
           status:
             description: GitlabStatus defines the observed state of Gitlab

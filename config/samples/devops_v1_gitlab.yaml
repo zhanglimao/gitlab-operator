@@ -17,3 +17,5 @@ spec:
       containerport: 22
       exportport: 30022
   defaultpassword: "12345678"
+  nodeselector: "master-1"
+  volumename: "pvc-1"

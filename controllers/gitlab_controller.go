@@ -190,6 +190,9 @@ func (r *GitlabReconciler) reconcilerGitlabDm(gitlab *devopsv1.Gitlab, req ctrl.
 					},
 				},
 				Spec: corev1.PodSpec{
+					NodeSelector: map[string]string{
+						"kubernetes.io/hostname": gitlab.Spec.NodeSelector,
+					},
 					Containers: []corev1.Container{
 						{
 							Name:            gitlab.Name,
@@ -199,6 +202,33 @@ func (r *GitlabReconciler) reconcilerGitlabDm(gitlab *devopsv1.Gitlab, req ctrl.
 								{
 									Name:  "GITLAB_ROOT_PASSWORD",
 									Value: gitlab.Spec.DefaultPassword,
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "volumes-data",
+									MountPath: "/etc/gitlab",
+									SubPath:   "config",
+								},
+								{
+									Name:      "volumes-data",
+									MountPath: "/var/log/gitlab",
+									SubPath:   "logs",
+								},
+								{
+									Name:      "volumes-data",
+									MountPath: "/var/opt/gitlab",
+									SubPath:   "data",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "volumes-data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: gitlab.Spec.VolumeName,
 								},
 							},
 						},

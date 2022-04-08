@@ -45,6 +45,10 @@ type GitlabSpec struct {
 	Port []ExportPort `json:"port,omitempty"`
 	// Gitlab Admin Account Default Password,Also Use Env GITLAB_ROOT_PASSWORD To Specify Default Passwd
 	DefaultPassword string `json:"defaultpassword,omitempty"`
+	// Kubernetes Persistent Volume Claim Name, Notify: Ensure PVC And Gitlab In The Same Namespace
+	VolumeName string `json:"volumename"`
+	// Gitlab Pod Affinity With Node Name, Notidy: If Use Local Volume Ensure PV And Gitlab In The Same Node
+	NodeSelector string `json:"nodeselector"`
 }
 
 // GitlabStatus defines the observed state of Gitlab
